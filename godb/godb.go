@@ -90,22 +90,27 @@ func IsAdmin(id int64) (bool, error) {
 	return exists, err
 }
 
-// PrintAllAdmins выводит всех администраторов
-func PrintAllAdmins() error {
-	rows, err := db.Query("SELECT id, role FROM admins")
+// Возвращает массив ID всех администраторов
+func GetAllAdmins() ([]int64, error) {
+	rows, err := db.Query("SELECT id FROM admins WHERE role = 'admin'")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rows.Close()
 
-	fmt.Println("Administrators:")
+	var admins []int64
 	for rows.Next() {
 		var id int64
-		var role string
-		if err := rows.Scan(&id, &role); err != nil {
-			return err
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
 		}
-		fmt.Printf("- %d (%s)\n", id, role)
+		admins = append(admins, id)
 	}
-	return rows.Err()
+
+	// Проверяем ошибки итерации
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return admins, nil
 }

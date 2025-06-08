@@ -2,10 +2,12 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"log"
 	"os"
 	"reporter/godb"
 	"reporter/telebot"
+	"strconv"
 	"strings"
 
 	"github.com/joho/godotenv"
@@ -35,10 +37,75 @@ func main() {
 		godotenv.Load(envFile)
 		API = os.Getenv("TG_BOT_API")
 	}
+	//godb.InitDB()
+	//godb.AddOrUpdateAdmin(1191474434, true)
 	godb.InitDB()
-	godb.AddOrUpdateAdmin(1191474434, true)
+	admines, err := godb.GetAllAdmins()
+	if err != nil {
+		log.Println(err)
+	}
+	if len(admines) < 1 {
+		log.Println("Не обнаружено ни одного администратора! Бот не ответит вам, если вы не администратор")
+		addAdministrator()
+	}
 	telebot.StartBot(&API)
-	godb.InitDB()
+
+}
+
+func addAdministrator() {
+	reader := bufio.NewReader(os.Stdin)
+
+	for {
+		fmt.Print("Введите Telegram ID пользователя для добавления в администраторы: ")
+		input, err := reader.ReadString('\n')
+		if err != nil {
+			fmt.Println("Ошибка чтения:", err)
+			continue
+		}
+
+		input = strings.TrimSpace(input)
+		if input == "" {
+			fmt.Println("Ошибка: пустой ввод")
+			continue
+		}
+
+		userID, err := strconv.ParseInt(input, 10, 64)
+		if err != nil {
+			fmt.Println("Ошибка: введенный id не является числом")
+			continue
+		}
+
+		if userID <= 0 {
+			fmt.Println("Ошибка: ID должен быть положительным числом")
+			continue
+		}
+
+		// Проверка существующих прав
+		isAdmin, err := godb.IsAdmin(userID)
+		if err == nil && isAdmin {
+			fmt.Printf("Пользователь %d уже является администратором\n", userID)
+			return
+		}
+
+		// Подтверждение
+		fmt.Printf("Добавить пользователя %d как администратора? (y/n): ", userID)
+		confirm, _ := reader.ReadString('\n')
+		confirm = strings.TrimSpace(strings.ToLower(confirm))
+
+		if confirm != "y" && confirm != "yes" {
+			fmt.Println("Действие отменено")
+			continue
+		}
+
+		// Добавление в БД
+		if err := godb.AddOrUpdateAdmin(userID, true); err != nil {
+			fmt.Println("Ошибка добавления администратора:", err)
+			continue
+		}
+
+		fmt.Printf("✅ Пользователь %d успешно добавлен как администратор\n", userID)
+		return
+	}
 }
 
 func createEnvFile(filename string) {
