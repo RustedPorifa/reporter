@@ -37,8 +37,6 @@ func main() {
 		godotenv.Load(envFile)
 		API = os.Getenv("TG_BOT_API")
 	}
-	//godb.InitDB()
-	//godb.AddOrUpdateAdmin(1191474434, true)
 	godb.InitDB()
 	admines, err := godb.GetAllAdmins()
 	if err != nil {
