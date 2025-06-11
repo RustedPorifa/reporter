@@ -20,6 +20,15 @@ func main() {
 	if err != nil && !os.IsExist(err) {
 		log.Panic("Ошибка создания папки: " + err.Error())
 	}
+	errTrash := os.Mkdir("trash", 0777)
+	if errTrash != nil && !os.IsExist(errTrash) {
+		log.Panic("Ошибка создания папки: " + errTrash.Error())
+	}
+
+	errTdata := os.Mkdir("tdata_sessions", 0777)
+	if errTdata != nil && !os.IsExist(errTdata) {
+		log.Panic("Ошибка создания папки: " + errTdata.Error())
+	}
 
 	if _, err := os.Stat(envFile); os.IsNotExist(err) {
 		createEnvFile(envFile)

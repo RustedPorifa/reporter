@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"reporter/godb"
@@ -18,15 +19,37 @@ import (
 
 var StartKeyboard = tgb.NewInlineKeyboardMarkup(
 	tgb.NewInlineKeyboardRow(
-		tgb.NewInlineKeyboardButtonData("Загрузить аккаунты (.zip)", "upload-accs"),
+		tgb.NewInlineKeyboardButtonData("Администрация", "admin-keyboard"),
+	),
+	tgb.NewInlineKeyboardRow(
+		tgb.NewInlineKeyboardButtonData("Аккаунты", "accs-keyboard"),
+	),
+	tgb.NewInlineKeyboardRow(
+		tgb.NewInlineKeyboardButtonData("Начать снос", "report-start"),
+	),
+)
+
+var adminKeyboard = tgb.NewInlineKeyboardMarkup(
+	tgb.NewInlineKeyboardRow(
 		tgb.NewInlineKeyboardButtonData("Добавить администратора", "add-admin"),
 	),
 	tgb.NewInlineKeyboardRow(
 		tgb.NewInlineKeyboardButtonData("Все администраторы", "show-admins"),
-		tgb.NewInlineKeyboardButtonData("Кол-во жалоб", "max-reports"),
 	),
 	tgb.NewInlineKeyboardRow(
-		tgb.NewInlineKeyboardButtonData("Начать снос", "report-start"),
+		tgb.NewInlineKeyboardButtonData("Меню", "menu"),
+	),
+)
+
+var accKeyboard = tgb.NewInlineKeyboardMarkup(
+	tgb.NewInlineKeyboardRow(
+		tgb.NewInlineKeyboardButtonData("Кол-во макс. жалоб", "max-reports"),
+	),
+	tgb.NewInlineKeyboardRow(
+		tgb.NewInlineKeyboardButtonData("Загрузить аккаунты (.zip)", "download-accs"),
+	),
+	tgb.NewInlineKeyboardRow(
+		tgb.NewInlineKeyboardButtonData("Меню", "menu"),
 	),
 )
 
@@ -71,7 +94,7 @@ func handleMessage(bot *tgb.BotAPI, Message *tgb.Message) {
 			msg.ReplyMarkup = StartKeyboard
 			sendMessage(bot, msg)
 		}
-	} else {
+	} else if isAdmin {
 		UserStateMu.Lock()
 		state := UserState[Message.From.ID]
 		UserStateMu.Unlock()
@@ -87,6 +110,8 @@ func handleMessage(bot *tgb.BotAPI, Message *tgb.Message) {
 		case "wait_for_username":
 			sendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Отправка массовых жалоб началась, ожидайте"))
 			reader.CollectAccs(Message.Text)
+		case "wait_for_zip":
+			handleZipUpload(bot, Message)
 		}
 	}
 
@@ -94,6 +119,20 @@ func handleMessage(bot *tgb.BotAPI, Message *tgb.Message) {
 
 func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
 	switch callback.Data {
+	//Keyboards
+	case "menu":
+		msg := tgb.NewEditMessageText(callback.Message.Chat.ID, callback.Message.MessageID, "Добро пожаловать в бота!\nПожалуйста, выберите опцию ниже")
+		msg.ReplyMarkup = &StartKeyboard
+		editMessage(bot, msg)
+	case "admin-keyboard":
+		edit := tgb.NewEditMessageText(callback.Message.Chat.ID, callback.Message.MessageID, "Вы в панеле администрации, выберите опцию ниже.")
+		edit.ReplyMarkup = &adminKeyboard
+		editMessage(bot, edit)
+	case "accs-keyboard":
+		edit := tgb.NewEditMessageText(callback.Message.Chat.ID, callback.Message.MessageID, "Вы в панеле управления аккаунтами для массовых жалоб, выберите опцию ниже.")
+		edit.ReplyMarkup = &accKeyboard
+		editMessage(bot, edit)
+	//Administration
 	case "add-admin":
 		sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Отправьте ID администратора"))
 		UserStateMu.Lock()
@@ -116,15 +155,22 @@ func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
 		msg := tgb.NewMessage(callback.Message.Chat.ID, adminsBuilder.String())
 		sendMessage(bot, msg)
 		return
+	//Accounts
 	case "max-reports":
 		reportsCount, err := reader.GetReports()
 		if err != nil {
 			sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, err.Error()))
 			return
 		}
-		msg := fmt.Sprintf("%s", "Максимальное количество репортов, готовых для отправки (если сессии ещё живы): "+strconv.Itoa(reportsCount))
+		msg := ("%s Максимальное количество репортов, готовых для отправки (если сессии ещё живы): " + strconv.Itoa(reportsCount))
 		sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, msg))
 		return
+	case "download-accs":
+		UserStateMu.Lock()
+		UserState[callback.From.ID] = "wait_for_zip"
+		UserStateMu.Unlock()
+		sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Отправьте .zip файл, который состоит из Tdata для загрузки"))
+		//reports
 	case "report-start":
 		sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Введите юзернейм пользователя для сноса"))
 		UserStateMu.Lock()
@@ -145,6 +191,54 @@ func editMessage(bot *tgb.BotAPI, edit tgb.EditMessageTextConfig) {
 	}
 }
 
+func handleZipUpload(bot *tgb.BotAPI, msg *tgb.Message) {
+	go func() {
+		file, err := bot.GetFile(tgb.FileConfig{FileID: msg.Document.FileID})
+		if err != nil {
+			sendMessage(bot, tgb.NewMessage(msg.Chat.ID, err.Error()))
+			return
+		}
+
+		url := fmt.Sprintf("https://api.telegram.org/file/bot%s/%s", bot.Token, file.FilePath)
+		resp, err := http.Get(url)
+		if err != nil {
+			log.Println("Ошибка скачивания файла:", err)
+			return
+		}
+		defer resp.Body.Close()
+
+		out, err := os.Create(msg.Document.FileName)
+		if err != nil {
+			log.Println("Ошибка создания файла:", err)
+			return
+		}
+		defer out.Close()
+
+		if _, err = io.Copy(out, resp.Body); err != nil {
+			log.Println("Ошибка сохранения файла:", err)
+			return
+		}
+
+		if err := unzip(out.Name(), "tdata_sessions"); err != nil {
+			log.Printf("Ошибка распаковки: %v", err)
+			sendMessage(bot, tgb.NewMessage(msg.Chat.ID, "Ошибка обработки файла"))
+			return
+		}
+
+		log.Printf("Файл %s успешно обработан", msg.Document.FileName)
+		sendMessage(bot, tgb.NewMessage(msg.Chat.ID, "Файл успешно обработан, начинаю загрзку сессий, ожидайте..."))
+
+		UserStateMu.Lock()
+		delete(UserState, msg.From.ID)
+		UserStateMu.Unlock()
+		entry, _ := os.ReadDir("tdata_sessions")
+		for _, session := range entry {
+			go reader.LoadSessions(session.Name())
+		}
+
+	}()
+}
+
 func unzip(src string, dest string) error {
 	r, err := zip.OpenReader(src)
 	if err != nil {
@@ -154,14 +248,11 @@ func unzip(src string, dest string) error {
 
 	for _, f := range r.File {
 		fpath := filepath.Join(dest, f.Name)
-
-		// Защита от выхода за пределы dest (безопасность)
 		if !strings.HasPrefix(fpath, filepath.Clean(dest)+string(os.PathSeparator)) {
 			return fmt.Errorf("недопустимый путь файла: %s", fpath)
 		}
 
 		if f.FileInfo().IsDir() {
-			// Создаем каталог
 			if err := os.MkdirAll(fpath, os.ModePerm); err != nil {
 				return err
 			}
@@ -173,21 +264,18 @@ func unzip(src string, dest string) error {
 			return err
 		}
 
-		// Открываем файл внутри архива
 		rc, err := f.Open()
 		if err != nil {
 			return err
 		}
 		defer rc.Close()
 
-		// Создаем файл на диске
 		outFile, err := os.Create(fpath)
 		if err != nil {
 			return err
 		}
 		defer outFile.Close()
 
-		// Копируем содержимое файла
 		if _, err := io.Copy(outFile, rc); err != nil {
 			return err
 		}
