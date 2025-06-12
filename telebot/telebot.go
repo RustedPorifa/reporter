@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reporter/godb"
 	"reporter/reader"
+	"reporter/report"
 	"strconv"
 	"strings"
 	"sync"
@@ -109,7 +110,18 @@ func handleMessage(bot *tgb.BotAPI, Message *tgb.Message) {
 			sendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Новый администратор успешно добавлен"))
 		case "wait_for_username":
 			sendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Отправка массовых жалоб началась, ожидайте"))
-			reader.CollectAccs(Message.Text)
+			entry, err := os.ReadDir("sessions")
+			if err != nil {
+				sendMessage(bot, tgb.NewMessage(Message.Chat.ID, err.Error()))
+			}
+			for _, sess := range entry {
+				err := report.StartReport(filepath.Join("sessions", sess.Name()), Message.Text)
+				if err != nil {
+					sendMessage(bot, tgb.NewMessage(Message.Chat.ID, fmt.Sprintf("Возникла ошибка! Скорее всего она связана с юзернеймом, проверьте правильность написания\nError: %s", err.Error())))
+					return
+				}
+			}
+
 		case "wait_for_zip":
 			handleZipUpload(bot, Message)
 		}
@@ -174,7 +186,7 @@ func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
 	case "report-start":
 		sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Введите юзернейм пользователя для сноса"))
 		UserStateMu.Lock()
-		UserState[callback.Message.From.ID] = "wait_for_username"
+		UserState[callback.From.ID] = "wait_for_username"
 		UserStateMu.Unlock()
 	}
 }
