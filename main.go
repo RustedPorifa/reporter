@@ -80,7 +80,7 @@ func addAdministrator() {
 			fmt.Println("Ошибка: пустой ввод")
 			continue
 		}
-
+		//ХУЙ
 		userID, err := strconv.ParseInt(input, 10, 64)
 		if err != nil {
 			fmt.Println("Ошибка: введенный id не является числом")
