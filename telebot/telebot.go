@@ -130,6 +130,11 @@ func handleMessage(bot *tgb.BotAPI, Message *tgb.Message) {
 }
 
 func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
+	defer func() {
+		if _, err := bot.Request(tgb.NewCallback(callback.ID, "")); err != nil {
+			log.Printf("Callback answer error: %v", err)
+		}
+	}()
 	switch callback.Data {
 	//Keyboards
 	case "menu":
