@@ -138,7 +138,9 @@ func handleMessage(bot *tgb.BotAPI, Message *tgb.Message) {
 			sendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Новый администратор успешно добавлен"))
 		case "wait_for_username":
 			if report.IsValid(Message.Text) {
-				sendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Выберите вид жалоб для сноса\nДа, вид жалоб может повлиять на вид санкции со стороны телеграмма"))
+				msg := tgb.NewMessage(Message.Chat.ID, "Выберите вид жалобы для сноса\nДа, вид жалобы может повлиять на вид санкции со стороны телеграмма")
+				msg.ReplyMarkup = reportKeyboard
+				sendMessage(bot, msg)
 				ToReportMu.Lock()
 				ToReport[Message.From.ID] = Message.Text
 				ToReportMu.Unlock()
