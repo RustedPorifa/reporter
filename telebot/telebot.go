@@ -18,6 +18,7 @@ import (
 	tgb "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+// Keyboards
 var StartKeyboard = tgb.NewInlineKeyboardMarkup(
 	tgb.NewInlineKeyboardRow(
 		tgb.NewInlineKeyboardButtonData("Администрация", "admin-keyboard"),
@@ -54,9 +55,36 @@ var accKeyboard = tgb.NewInlineKeyboardMarkup(
 	),
 )
 
+var reportKeyboard = tgb.NewInlineKeyboardMarkup(
+	tgb.NewInlineKeyboardRow(
+		tgb.NewInlineKeyboardButtonData("Спам", "report-complaint-spam"),
+		tgb.NewInlineKeyboardButtonData("Авторское право", "report-complaint-author"),
+	),
+	tgb.NewInlineKeyboardRow(
+		tgb.NewInlineKeyboardButtonData("Гео вор", "report-complaint-geo"),
+		tgb.NewInlineKeyboardButtonData("Наркотики", "report-complaint-drug"),
+	),
+	tgb.NewInlineKeyboardRow(
+		tgb.NewInlineKeyboardButtonData("Жестокость к детям", "report-complaint-child"),
+		tgb.NewInlineKeyboardButtonData("Личные данные", "report-complaint-personal"),
+	),
+	tgb.NewInlineKeyboardRow(
+		tgb.NewInlineKeyboardButtonData("Порнография", "report-complaint-porno"),
+		tgb.NewInlineKeyboardButtonData("Насилие", "report-complaint-violence"),
+	),
+)
+
+//Keyboard end
+
+// Vars
 var (
 	UserState   = make(map[int64]string)
 	UserStateMu sync.Mutex
+)
+
+var (
+	ToReport   = make(map[int64]string)
+	ToReportMu sync.Mutex
 )
 
 func StartBot(API *string) {
@@ -109,17 +137,14 @@ func handleMessage(bot *tgb.BotAPI, Message *tgb.Message) {
 			godb.AddOrUpdateAdmin(userID, true)
 			sendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Новый администратор успешно добавлен"))
 		case "wait_for_username":
-			sendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Отправка массовых жалоб началась, ожидайте"))
-			entry, err := os.ReadDir("sessions")
-			if err != nil {
-				sendMessage(bot, tgb.NewMessage(Message.Chat.ID, err.Error()))
-			}
-			for _, sess := range entry {
-				err := report.StartReport(filepath.Join("sessions", sess.Name()), Message.Text)
-				if err != nil {
-					sendMessage(bot, tgb.NewMessage(Message.Chat.ID, fmt.Sprintf("Возникла ошибка! Скорее всего она связана с юзернеймом, проверьте правильность написания\nError: %s", err.Error())))
-					return
-				}
+			if report.IsValid(Message.Text) {
+				sendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Выберите вид жалоб для сноса\nДа, вид жалоб может повлиять на вид санкции со стороны телеграмма"))
+				ToReportMu.Lock()
+				ToReport[Message.From.ID] = Message.Text
+				ToReportMu.Unlock()
+
+			} else {
+				sendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Юзернейм невалидный, напишите только символы без @"))
 			}
 
 		case "wait_for_zip":
@@ -189,10 +214,30 @@ func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
 		sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Отправьте .zip файл, который состоит из Tdata для загрузки"))
 		//reports
 	case "report-start":
-		sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Введите юзернейм пользователя для сноса"))
+		sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Введите юзернейм пользователя для сноса\nВид юзернейма должен представлять исключительно сам юзернейм\n@dunduk -> dunduk"))
 		UserStateMu.Lock()
 		UserState[callback.From.ID] = "wait_for_username"
 		UserStateMu.Unlock()
+	default:
+		parts := strings.Split(callback.Data, "-")
+		ToReportMu.Lock()
+		usernameReport := ToReport[callback.From.ID]
+		ToReportMu.Unlock()
+		if len(parts) == 3 && parts[1] == "complaint" && usernameReport != "" {
+			entry, err := os.ReadDir("sessions")
+			if err != nil {
+				sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, err.Error()))
+				return
+			}
+			for _, sess := range entry {
+				err := report.StartReport(filepath.Join("sessions", sess.Name()), usernameReport, parts[2])
+				if err != nil {
+					println(err.Error())
+					continue
+				}
+			}
+
+		}
 	}
 }
 
