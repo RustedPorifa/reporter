@@ -229,6 +229,7 @@ func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
 		usernameReport := ToReport[callback.From.ID]
 		ToReportMu.Unlock()
 		if len(parts) == 3 && parts[1] == "complaint" && usernameReport != "" {
+			sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Запрос успешно обработан! Жалобы будут отправлены в скором времени."))
 			entry, err := os.ReadDir("sessions")
 			if err != nil {
 				sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, err.Error()))
@@ -241,6 +242,7 @@ func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
 					continue
 				}
 			}
+			sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Жалобы успешно отправлены, запрос обработан"))
 
 		}
 	}
