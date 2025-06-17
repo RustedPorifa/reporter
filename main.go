@@ -25,7 +25,7 @@ func main() {
 		}
 		if folder == "messages" {
 			for _, fileName := range msgFilesName {
-				os.Create(filepath.Join("messages", fileName))
+				file, _ := os.Create(filepath.Join("messages", fileName))
 			}
 		}
 	}
