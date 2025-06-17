@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"reporter/godb"
 	"reporter/telebot"
 	"strconv"
@@ -12,6 +13,8 @@ import (
 
 	"github.com/joho/godotenv"
 )
+
+var msgFilesName = []string{"spam.json", "author.json", "geo.json", "drug.json", "child.json", "personal.json", "porno.json", "violence.json"}
 
 func main() {
 	envFile := "APIs.env"
@@ -33,6 +36,15 @@ func main() {
 	errMsg := os.Mkdir("tdata_sessions", 0777)
 	if errMsg != nil && !os.IsExist(errMsg) {
 		log.Panic("Ошибка создания папки: " + errMsg.Error())
+	}
+
+	errMsgs := os.Mkdir("messages", 0777)
+	if errMsgs != nil && !os.IsExist(errMsgs) {
+		log.Panic("Ошибка создания папки: " + err.Error())
+	} else {
+		for _, fileName := range msgFilesName {
+			os.Create(filepath.Join("messages", fileName))
+		}
 	}
 
 	if _, err := os.Stat(envFile); os.IsNotExist(err) {
