@@ -27,6 +27,9 @@ var StartKeyboard = tgb.NewInlineKeyboardMarkup(
 		tgb.NewInlineKeyboardButtonData("Аккаунты", "accs-keyboard"),
 	),
 	tgb.NewInlineKeyboardRow(
+		tgb.NewInlineKeyboardButtonData("Загрузить сообщения", "messages-keyboard"),
+	),
+	tgb.NewInlineKeyboardRow(
 		tgb.NewInlineKeyboardButtonData("Начать снос", "report-start"),
 	),
 )
@@ -61,7 +64,7 @@ var reportKeyboard = tgb.NewInlineKeyboardMarkup(
 		tgb.NewInlineKeyboardButtonData("Авторское право", "report-complaint-author"),
 	),
 	tgb.NewInlineKeyboardRow(
-		tgb.NewInlineKeyboardButtonData("Гео вор", "report-complaint-geo"),
+		tgb.NewInlineKeyboardButtonData("Раскрытые гео", "report-complaint-geo"),
 		tgb.NewInlineKeyboardButtonData("Наркотики", "report-complaint-drug"),
 	),
 	tgb.NewInlineKeyboardRow(

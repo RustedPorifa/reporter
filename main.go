@@ -14,38 +14,22 @@ import (
 	"github.com/joho/godotenv"
 )
 
-var msgFilesName = []string{"spam.json", "author.json", "geo.json", "drug.json", "child.json", "personal.json", "porno.json", "violence.json"}
+var folderNames = [4]string{"sessions", "trash", "tdata_sessions", "messages"}
+var msgFilesName = [8]string{"spam.json", "author.json", "geo.json", "drug.json", "child.json", "personal.json", "porno.json", "violence.json"}
 
 func main() {
-	envFile := "APIs.env"
-
-	err := os.Mkdir("sessions", 0777)
-	if err != nil && !os.IsExist(err) {
-		log.Panic("Ошибка создания папки: " + err.Error())
-	}
-	errTrash := os.Mkdir("trash", 0777)
-	if errTrash != nil && !os.IsExist(errTrash) {
-		log.Panic("Ошибка создания папки: " + errTrash.Error())
-	}
-
-	errTdata := os.Mkdir("tdata_sessions", 0777)
-	if errTdata != nil && !os.IsExist(errTdata) {
-		log.Panic("Ошибка создания папки: " + errTdata.Error())
-	}
-
-	errMsg := os.Mkdir("tdata_sessions", 0777)
-	if errMsg != nil && !os.IsExist(errMsg) {
-		log.Panic("Ошибка создания папки: " + errMsg.Error())
-	}
-
-	errMsgs := os.Mkdir("messages", 0777)
-	if errMsgs != nil && !os.IsExist(errMsgs) {
-		log.Panic("Ошибка создания папки: " + err.Error())
-	} else {
-		for _, fileName := range msgFilesName {
-			os.Create(filepath.Join("messages", fileName))
+	for _, folder := range folderNames {
+		err := os.Mkdir(folder, 0777)
+		if err != nil && !os.IsExist(err) {
+			log.Panic("Ошибка создании папки: ", err.Error())
+		}
+		if folder == "messages" {
+			for _, fileName := range msgFilesName {
+				os.Create(filepath.Join("messages", fileName))
+			}
 		}
 	}
+	envFile := "APIs.env"
 
 	if _, err := os.Stat(envFile); os.IsNotExist(err) {
 		createEnvFile(envFile)
@@ -92,7 +76,7 @@ func addAdministrator() {
 			fmt.Println("Ошибка: пустой ввод")
 			continue
 		}
-		//ХУЙ
+
 		userID, err := strconv.ParseInt(input, 10, 64)
 		if err != nil {
 			fmt.Println("Ошибка: введенный id не является числом")
