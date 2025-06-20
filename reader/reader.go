@@ -57,11 +57,11 @@ func LoadSessions(fileName string) {
 		SessionStorage: storage,
 	})
 	if err := client.Run(ctx, func(ctx context.Context) error {
+		os.Remove(tdataPath)
 		return nil
 	}); err != nil {
 		println(err.Error())
 	}
-	return
 }
 
 func GetReports() (int, error) {

@@ -23,7 +23,7 @@ func main() {
 		if err != nil && !os.IsExist(err) {
 			log.Panic("Ошибка создании папки: ", err.Error())
 		}
-		if folder == "messages" {
+		if folder == "messages" && !os.IsExist(err) {
 			for _, fileName := range msgFilesName {
 				os.Create(filepath.Join("messages", fileName))
 

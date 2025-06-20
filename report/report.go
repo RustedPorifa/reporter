@@ -30,30 +30,33 @@ func StartReport(pathToFile string, username string, reportType string) error {
 	ctx := context.Background()
 	actionCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
+
 	dataBytes, err := os.ReadFile(pathToFile)
 	if err != nil {
 		fmt.Println("Error reading session file:", err)
 		return err
 	}
 
-	var data *session.Data
-	if err := json.Unmarshal(dataBytes, &data); err != nil {
+	var sessionInfo *session.Data
+	if err := json.Unmarshal(dataBytes, &sessionInfo); err != nil {
 		fmt.Println("Error unmarshaling session:", err)
 		return err
 	}
 
 	storage := &session.StorageMemory{}
 	loader := session.Loader{Storage: storage}
-	if err := loader.Save(ctx, data); err != nil {
+	if err := loader.Save(ctx, sessionInfo); err != nil {
 		fmt.Println("Error loading session into storage:", err)
 		return err
 	}
+
 	client := telegram.NewClient(telegram.TestAppID, telegram.TestAppHash, telegram.Options{
 		SessionStorage:      storage,
 		ReconnectionBackoff: nil,
 		NoUpdates:           true,
 		MaxRetries:          2,
 	})
+
 	if err := client.Run(actionCtx, func(ctx context.Context) error {
 		api := client.API()
 		resolved, errResolved := api.ContactsResolveUsername(actionCtx, &tg.ContactsResolveUsernameRequest{
@@ -62,6 +65,7 @@ func StartReport(pathToFile string, username string, reportType string) error {
 		if errResolved != nil {
 			return errResolved
 		}
+
 		var targetPeer tg.InputPeerClass
 		for _, user := range resolved.Users {
 			if u, ok := user.(*tg.User); ok && u.Username == username {
@@ -75,30 +79,44 @@ func StartReport(pathToFile string, username string, reportType string) error {
 		if targetPeer == nil {
 			return errors.New("не было найдено ни единого пользователя")
 		}
-		var ReportsMessages MessageData
-		jsonData, jserr := os.ReadFile(filepath.Join("messages", reportType+".json"))
+
+		// Исправления начинаются здесь:
+		// 1. Читаем правильный файл сообщений
+		msgPath := filepath.Join("messages", reportType+".json")
+		jsonData, jserr := os.ReadFile(msgPath)
 		if jserr != nil {
-			return jserr
+			return fmt.Errorf("error reading messages file: %w", jserr)
 		}
-		err := json.Unmarshal([]byte(jsonData), &data)
-		if err != nil {
-			fmt.Println("Ошибка парсинга JSON:", err)
-			return err
+
+		// 2. Проверяем что файл не пустой
+		if len(jsonData) == 0 {
+			return errors.New("messages file is empty")
 		}
-		index := rand.IntN(len(ReportsMessages.Messages))
+
+		// 3. Используем правильную структуру
+		var messageData MessageData
+		if err := json.Unmarshal(jsonData, &messageData); err != nil {
+			return fmt.Errorf("JSON parsing error: %w", err)
+		}
+
+		// 4. Проверяем наличие сообщений
+		if len(messageData.Messages) == 0 {
+			return errors.New("no messages available")
+		}
+
+		index := rand.IntN(len(messageData.Messages))
 
 		_, errReport := api.AccountReportPeer(actionCtx, &tg.AccountReportPeerRequest{
 			Peer:    targetPeer,
 			Reason:  &tg.InputReportReasonSpam{},
-			Message: ReportsMessages.Messages[index],
+			Message: messageData.Messages[index],
 		})
-		if errReport != nil {
-			return errReport
-		}
-		return nil
+		return errReport
 	}); err != nil {
-		os.Rename(pathToFile, trashPath)
-		println(err.Error())
+		// Перемещаем в trash только если папка существует
+		if _, err := os.Stat(trashPath); !os.IsNotExist(err) {
+			os.Rename(pathToFile, filepath.Join(trashPath, filepath.Base(pathToFile)))
+		}
 		return err
 	}
 	return nil
