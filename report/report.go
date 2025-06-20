@@ -80,26 +80,21 @@ func StartReport(pathToFile string, username string, reportType string) error {
 			return errors.New("не было найдено ни единого пользователя")
 		}
 
-		// Исправления начинаются здесь:
-		// 1. Читаем правильный файл сообщений
 		msgPath := filepath.Join("messages", reportType+".json")
 		jsonData, jserr := os.ReadFile(msgPath)
 		if jserr != nil {
 			return fmt.Errorf("error reading messages file: %w", jserr)
 		}
 
-		// 2. Проверяем что файл не пустой
 		if len(jsonData) == 0 {
 			return errors.New("messages file is empty")
 		}
 
-		// 3. Используем правильную структуру
 		var messageData MessageData
 		if err := json.Unmarshal(jsonData, &messageData); err != nil {
 			return fmt.Errorf("JSON parsing error: %w", err)
 		}
 
-		// 4. Проверяем наличие сообщений
 		if len(messageData.Messages) == 0 {
 			return errors.New("no messages available")
 		}
@@ -113,7 +108,6 @@ func StartReport(pathToFile string, username string, reportType string) error {
 		})
 		return errReport
 	}); err != nil {
-		// Перемещаем в trash только если папка существует
 		if _, err := os.Stat(trashPath); !os.IsNotExist(err) {
 			os.Rename(pathToFile, filepath.Join(trashPath, filepath.Base(pathToFile)))
 		}

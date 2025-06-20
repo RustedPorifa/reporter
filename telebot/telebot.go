@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
+	"reporter/emulator"
 	"reporter/godb"
 	"reporter/reader"
 	"reporter/report"
@@ -127,7 +129,7 @@ func handleMessage(bot *tgb.BotAPI, Message *tgb.Message) {
 		case "start":
 			msg := tgb.NewMessage(Message.Chat.ID, "Добро пожаловать в бота!\nПожалуйста, выберите опцию ниже")
 			msg.ReplyMarkup = StartKeyboard
-			sendMessage(bot, msg)
+			SendMessage(bot, msg)
 		}
 	} else if isAdmin {
 		UserStateMu.Lock()
@@ -137,27 +139,37 @@ func handleMessage(bot *tgb.BotAPI, Message *tgb.Message) {
 		case "add_admin":
 			userID, err := strconv.ParseInt(Message.Text, 10, 64)
 			if err != nil {
-				sendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Введен неверный формат id, попробуйте ещё раз"))
+				SendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Введен неверный формат id, попробуйте ещё раз"))
 				return
 			}
 			godb.AddOrUpdateAdmin(userID, true)
-			sendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Новый администратор успешно добавлен"))
+			SendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Новый администратор успешно добавлен"))
 		case "wait_for_username":
 			if report.IsValid(Message.Text) {
 				msg := tgb.NewMessage(Message.Chat.ID, "Выберите вид жалобы для сноса\nДа, вид жалобы может повлиять на вид санкции со стороны телеграмма")
 				msg.ReplyMarkup = reportKeyboard
-				sendMessage(bot, msg)
+				SendMessage(bot, msg)
 				ToReportMu.Lock()
 				ToReport[Message.From.ID] = Message.Text
 				ToReportMu.Unlock()
 
 			} else {
-				sendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Юзернейм невалидный, напишите только символы без @"))
+				SendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Юзернейм невалидный, напишите только символы без @"))
 			}
 
 		case "wait_for_zip":
 			handleZipUpload(bot, Message)
+		case "wait_for_channel":
+			re := regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{4,31}$`)
+			if !re.MatchString(Message.Text) {
+				SendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Имя канал невалидное, попробуйте без ссылки"))
+				go emulator.JoinChannelWithRotation(Message.Text, bot, Message.Chat.ID)
+			} else {
+				SendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Накрутка на адаптер началась, в течении дня она завершится"))
+
+			}
 		}
+
 	}
 
 }
@@ -171,7 +183,7 @@ func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
 	switch callback.Data {
 	case "trash":
 		trashAmout, _ := reader.GetTrash()
-		sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Очистка мусора началась, всего элементов: "+trashAmout))
+		SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Очистка мусора началась, всего элементов: "+trashAmout))
 		go reader.DeleteTrash()
 
 	//Keyboards
@@ -189,14 +201,14 @@ func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
 		editMessage(bot, edit)
 	//Administration
 	case "add-admin":
-		sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Отправьте ID администратора"))
+		SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Отправьте ID администратора"))
 		UserStateMu.Lock()
 		UserState[callback.From.ID] = "add_admin"
 		UserStateMu.Unlock()
 	case "show-admins":
 		admins, err := godb.GetAllAdmins()
 		if err != nil {
-			sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, err.Error()))
+			SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, err.Error()))
 			return
 		}
 
@@ -208,28 +220,33 @@ func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
 		}
 
 		msg := tgb.NewMessage(callback.Message.Chat.ID, adminsBuilder.String())
-		sendMessage(bot, msg)
+		SendMessage(bot, msg)
 		return
 	//Accounts
 	case "max-reports":
 		reportsCount, err := reader.GetReports()
 		if err != nil {
-			sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, err.Error()))
+			SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, err.Error()))
 			return
 		}
 		msg := ("%s Максимальное количество репортов, готовых для отправки (если сессии ещё живы): " + strconv.Itoa(reportsCount))
-		sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, msg))
+		SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, msg))
 		return
 	case "download-accs":
 		UserStateMu.Lock()
 		UserState[callback.From.ID] = "wait_for_zip"
 		UserStateMu.Unlock()
-		sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Отправьте .zip файл, который состоит из Tdata для загрузки"))
+		SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Отправьте .zip файл, который состоит из Tdata для загрузки"))
 		//reports
 	case "report-start":
-		sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Введите юзернейм пользователя для сноса\nВид юзернейма должен представлять исключительно сам юзернейм\n@dunduk -> dunduk"))
+		SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Введите юзернейм пользователя для сноса\nВид юзернейма должен представлять исключительно сам юзернейм\n@dunduk -> dunduk"))
 		UserStateMu.Lock()
 		UserState[callback.From.ID] = "wait_for_username"
+		UserStateMu.Unlock()
+	case "recruiment-start":
+		SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Введите канал пользователя для сноса\nВид юзернейма должен представлять исключительно сам канал\nt.me//dunduk -> dunduk"))
+		UserStateMu.Lock()
+		UserState[callback.From.ID] = "wait_for_channel"
 		UserStateMu.Unlock()
 	default:
 		parts := strings.Split(callback.Data, "-")
@@ -237,10 +254,10 @@ func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
 		usernameReport := ToReport[callback.From.ID]
 		ToReportMu.Unlock()
 		if len(parts) == 3 && parts[1] == "complaint" && usernameReport != "" {
-			sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Запрос успешно обработан! Жалобы будут отправлены в скором времени."))
+			SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Запрос успешно обработан! Жалобы будут отправлены в скором времени."))
 			entry, err := os.ReadDir("sessions")
 			if err != nil {
-				sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, err.Error()))
+				SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, err.Error()))
 				return
 			}
 			for _, sess := range entry {
@@ -250,13 +267,13 @@ func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
 					continue
 				}
 			}
-			sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Жалобы успешно отправлены, запрос обработан"))
+			SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Жалобы успешно отправлены, запрос обработан"))
 
 		}
 	}
 }
 
-func sendMessage(bot *tgb.BotAPI, msg tgb.MessageConfig) {
+func SendMessage(bot *tgb.BotAPI, msg tgb.MessageConfig) {
 	if _, err := bot.Send(msg); err != nil {
 		log.Printf("Error sending message: %v", err)
 	}
@@ -272,7 +289,7 @@ func handleZipUpload(bot *tgb.BotAPI, msg *tgb.Message) {
 	go func() {
 		file, err := bot.GetFile(tgb.FileConfig{FileID: msg.Document.FileID})
 		if err != nil {
-			sendMessage(bot, tgb.NewMessage(msg.Chat.ID, err.Error()))
+			SendMessage(bot, tgb.NewMessage(msg.Chat.ID, err.Error()))
 			return
 		}
 
@@ -298,12 +315,12 @@ func handleZipUpload(bot *tgb.BotAPI, msg *tgb.Message) {
 
 		if err := unzip(out.Name(), "tdata_sessions"); err != nil {
 			log.Printf("Ошибка распаковки: %v", err)
-			sendMessage(bot, tgb.NewMessage(msg.Chat.ID, "Ошибка обработки файла"))
+			SendMessage(bot, tgb.NewMessage(msg.Chat.ID, "Ошибка обработки файла"))
 			return
 		}
 
 		log.Printf("Файл %s успешно обработан", msg.Document.FileName)
-		sendMessage(bot, tgb.NewMessage(msg.Chat.ID, "Файл успешно обработан, начинаю загрзку сессий, ожидайте..."))
+		SendMessage(bot, tgb.NewMessage(msg.Chat.ID, "Файл успешно обработан, начинаю загрзку сессий, ожидайте..."))
 
 		UserStateMu.Lock()
 		delete(UserState, msg.From.ID)
