@@ -30,6 +30,9 @@ var StartKeyboard = tgb.NewInlineKeyboardMarkup(
 		tgb.NewInlineKeyboardButtonData("Загрузить сообщения", "messages-keyboard"),
 	),
 	tgb.NewInlineKeyboardRow(
+		tgb.NewInlineKeyboardButtonData("Муссорка", "trash"),
+	),
+	tgb.NewInlineKeyboardRow(
 		tgb.NewInlineKeyboardButtonData("Начать снос", "report-start"),
 	),
 )
@@ -166,6 +169,11 @@ func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
 		}
 	}()
 	switch callback.Data {
+	case "trash":
+		trashAmout, _ := reader.GetTrash()
+		sendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Очистка мусора началась, всего элементов: "+trashAmout))
+		go reader.DeleteTrash()
+
 	//Keyboards
 	case "menu":
 		msg := tgb.NewEditMessageText(callback.Message.Chat.ID, callback.Message.MessageID, "Добро пожаловать в бота!\nПожалуйста, выберите опцию ниже")

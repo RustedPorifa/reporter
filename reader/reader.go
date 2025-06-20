@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"github.com/gotd/td/session"
 	"github.com/gotd/td/session/tdesktop"
@@ -70,4 +71,25 @@ func GetReports() (int, error) {
 		return 0, err
 	}
 	return len(entry), nil
+}
+
+func DeleteTrash() {
+	entry, _ := os.ReadDir("trash")
+	for _, file := range entry {
+		pathToFile := filepath.Join("trash", file.Name())
+		if file.IsDir() {
+			os.RemoveAll(pathToFile)
+		} else {
+			os.Remove(pathToFile)
+		}
+	}
+}
+
+func GetTrash() (string, error) {
+	entry, err := os.ReadDir("trash")
+	if err != nil {
+		return "err", err
+	}
+
+	return strconv.Itoa(len(entry)), nil
 }
