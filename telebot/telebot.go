@@ -29,7 +29,7 @@ var StartKeyboard = tgb.NewInlineKeyboardMarkup(
 		tgb.NewInlineKeyboardButtonData("Аккаунты", "accs-keyboard"),
 	),
 	tgb.NewInlineKeyboardRow(
-		tgb.NewInlineKeyboardButtonData("Загрузить сообщения", "messages-keyboard"),
+		tgb.NewInlineKeyboardButtonData("Накрутка", "wait_for_channel"),
 	),
 	tgb.NewInlineKeyboardRow(
 		tgb.NewInlineKeyboardButtonData("Муссорка", "trash"),

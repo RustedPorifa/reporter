@@ -84,9 +84,9 @@ func EmulateActivity() {
 }
 func JoinChannelWithRotation(channelUsername string, bot *tgbotapi.BotAPI, chatToSend int64) {
 	var accountsPool []string
-	entries, _ := os.ReadDir("LoadedSessions")
+	entries, _ := os.ReadDir("sessions")
 	for _, file := range entries {
-		accountsPool = append(accountsPool, filepath.Join("LoadedSessions", file.Name()))
+		accountsPool = append(accountsPool, filepath.Join("sessions", file.Name()))
 	}
 
 	for len(accountsPool) > 0 {
