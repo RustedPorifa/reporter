@@ -29,7 +29,7 @@ var StartKeyboard = tgb.NewInlineKeyboardMarkup(
 		tgb.NewInlineKeyboardButtonData("Аккаунты", "accs-keyboard"),
 	),
 	tgb.NewInlineKeyboardRow(
-		tgb.NewInlineKeyboardButtonData("Накрутка", "wait_for_channel"),
+		tgb.NewInlineKeyboardButtonData("Накрутка", "recruiment-start"),
 	),
 	tgb.NewInlineKeyboardRow(
 		tgb.NewInlineKeyboardButtonData("Муссорка", "trash"),
@@ -166,7 +166,7 @@ func handleMessage(bot *tgb.BotAPI, Message *tgb.Message) {
 				go emulator.JoinChannelWithRotation(Message.Text, bot, Message.Chat.ID)
 			} else {
 				SendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Накрутка на адаптер началась, в течении дня она завершится"))
-
+				go emulator.JoinChannelWithRotation(Message.Text, bot, Message.Chat.ID)
 			}
 		}
 

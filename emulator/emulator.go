@@ -57,37 +57,24 @@ func buildSession(sessionPath string, ctx context.Context) (*telegram.Client, er
 	return client, nil
 
 }
-func EmulateActivity() {
-	var accountsPool = []string{}
-	entry, _ := os.ReadDir("LoadedSessions")
-	for _, file := range entry {
-		accountsPool = append(accountsPool, filepath.Join("LoadedSessions", file.Name()))
-	}
-	for {
-		rand.Shuffle(len(accountsPool), func(i, j int) {
-			accountsPool[i], accountsPool[j] = accountsPool[j], accountsPool[i]
-		})
 
-		selected := accountsPool[:rand.Intn(len(accountsPool))+1] // +1 чтобы избежать 0
-		var wg sync.WaitGroup
-
-		for _, path := range selected {
-			wg.Add(1)
-			go func(p string) {
-				defer wg.Done()
-				processAccount(p)
-			}(path)
-		}
-		wg.Wait() // Ждем завершения всех горутин перед следующей итерацией
-		time.Sleep(time.Duration(rand.Intn(30)) * time.Minute)
-	}
-}
 func JoinChannelWithRotation(channelUsername string, bot *tgbotapi.BotAPI, chatToSend int64) {
+
 	var accountsPool []string
-	entries, _ := os.ReadDir("sessions")
-	for _, file := range entries {
-		accountsPool = append(accountsPool, filepath.Join("sessions", file.Name()))
+	entries, err := os.ReadDir("sessions")
+	if err != nil {
+		log.Printf("Error reading sessions directory: %v", err)
+		return
 	}
+
+	for _, file := range entries {
+
+		if !file.IsDir() {
+			accountsPool = append(accountsPool, filepath.Join("sessions", file.Name()))
+		}
+	}
+
+	log.Printf("Total accounts: %d", len(accountsPool))
 
 	for len(accountsPool) > 0 {
 		batchSize := rand.Intn(7) + 4
@@ -95,60 +82,46 @@ func JoinChannelWithRotation(channelUsername string, bot *tgbotapi.BotAPI, chatT
 			batchSize = len(accountsPool)
 		}
 
-		// 4. Выбор случайного пакета аккаунтов
 		rand.Shuffle(len(accountsPool), func(i, j int) {
 			accountsPool[i], accountsPool[j] = accountsPool[j], accountsPool[i]
 		})
 		batch := accountsPool[:batchSize]
 
-		// 5. Параллельная обработка пакета
+		log.Printf("Processing batch of %d accounts", batchSize)
+
 		var wg sync.WaitGroup
 		for _, path := range batch {
 			wg.Add(1)
 			go func(sessionPath string) {
-				defer wg.Done()
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("Panic in account %s: %v", sessionPath, r)
+					}
+					wg.Done()
+				}()
+				log.Printf("Processing account: %s", sessionPath)
 				ProcessAndJoin(sessionPath, channelUsername)
 			}(path)
 		}
 		wg.Wait()
-
-		// 6. Удаление обработанных аккаунтов из пула
 		accountsPool = accountsPool[batchSize:]
 
-		// 7. Пауза перед следующим пакетом (если остались аккаунты)
 		if len(accountsPool) > 0 {
 			jitter := time.Duration(rand.Intn(6) - 3)
 			pause := 20*time.Minute + jitter*time.Minute
+			log.Printf("Next batch in %v (%d accounts left)", pause, len(accountsPool))
 			time.Sleep(pause)
 		}
 	}
-	msg := tgbotapi.NewMessage(chatToSend, "Накрутка в канал окончена. Канал: "+channelUsername)
+
+	msg := tgbotapi.NewMessage(chatToSend, "Накрутка завершена. Канал: "+channelUsername)
 	if _, err := bot.Send(msg); err != nil {
-		log.Printf("Error sending message: %v", err)
+		log.Printf("Error sending completion message: %v", err)
+	} else {
+		log.Printf("Completion message sent")
 	}
 }
-func processAccount(path string) {
-	ctx := context.Background()
-	client, err := buildSession(path, ctx)
-	if err != nil {
-		log.Println("NEW ERROR WHHILE BUILDING", err)
-		return
-	}
 
-	actionCtx, cancel := context.WithTimeout(ctx, time.Duration(rand.Intn(4))*time.Minute)
-	defer cancel() // Гарантированно выполнится при выходе из processAccount
-
-	// Синхронная обработка с контролем контекста
-	if err := client.Run(actionCtx, func(ctx context.Context) error {
-		errRead := readChats(ctx, client.API()) // Должна учитывать ctx!
-		if errRead != nil {
-			log.Println("NEW ERROR OCCURED", errRead)
-		}
-		return nil
-	}); err != nil {
-		log.Println("NEW ERORR WHILE LOAD SESSION: ", err)
-	}
-}
 func ProcessAndJoin(path string, channel string) {
 	ctx := context.Background()
 	client, err := buildSession(path, ctx)
@@ -157,7 +130,7 @@ func ProcessAndJoin(path string, channel string) {
 		return
 	}
 
-	actionCtx, cancel := context.WithTimeout(ctx, time.Duration(rand.Intn(4))*time.Minute)
+	actionCtx, cancel := context.WithTimeout(ctx, time.Duration(rand.Intn(10)+4)*time.Minute)
 	defer cancel()
 
 	if err := client.Run(actionCtx, func(ctx context.Context) error {
@@ -217,14 +190,14 @@ func JoinChannel(ctx context.Context, api *tg.Client, channelUsername string) er
 }
 
 func readChannel(ctx context.Context, api *tg.Client, channelUsername string) error {
-	const max_retries = 3
-	for attempt := 0; attempt < max_retries; attempt++ {
+	const maxRetries = 3
+	for attempt := 0; attempt < maxRetries; attempt++ {
 		// Разрешаем юзернейм в объект канала
 		res, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{
 			Username: channelUsername,
 		})
 		if err != nil {
-			fmt.Printf("Resolve username attempt %d: %v\n", attempt+1, err)
+			log.Printf("Resolve username attempt %d: %v", attempt+1, err)
 			humanDelay(2, 5)
 			continue
 		}
@@ -242,29 +215,33 @@ func readChannel(ctx context.Context, api *tg.Client, channelUsername string) er
 			return errors.New("channel not found in resolved entities")
 		}
 
-		// Создаем InputChannel для работы с API
+		// Пропускаем если не участник
+		if targetChannel.Left {
+			return errors.New("account is not a member of the channel")
+		}
+
 		inputChannel := &tg.InputChannel{
 			ChannelID:  targetChannel.ID,
 			AccessHash: targetChannel.AccessHash,
 		}
 
-		// Создаем InputPeerChannel для получения истории
 		peer := &tg.InputPeerChannel{
 			ChannelID:  targetChannel.ID,
 			AccessHash: targetChannel.AccessHash,
 		}
 
-		// Получаем последние сообщения
+		// Получаем последние сообщения (новые -> старые)
 		history, err := api.MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
 			Peer:  peer,
-			Limit: 10, // Увеличили лимит для примера
+			Limit: 10,
 		})
 		if err != nil {
-			fmt.Printf("Get history error: %v\n", err)
-			return fmt.Errorf("get history: %w", err)
+			log.Printf("Get history error: %v", err)
+			humanDelay(3, 7)
+			continue
 		}
 
-		// Извлекаем сообщения из разных типов ответа
+		// Извлекаем сообщения
 		var messages []tg.MessageClass
 		switch h := history.(type) {
 		case *tg.MessagesMessages:
@@ -274,37 +251,34 @@ func readChannel(ctx context.Context, api *tg.Client, channelUsername string) er
 		case *tg.MessagesChannelMessages:
 			messages = h.Messages
 		default:
-			fmt.Printf("Unhandled history type: %T\n", h)
-			return errors.New("unexpected history type")
+			log.Printf("Unsupported history type: %T", h)
+			continue
 		}
 
-		// Проверяем, есть ли сообщения
 		if len(messages) == 0 {
-			fmt.Println("No messages to read")
+			log.Println("No messages to read")
 			return nil
 		}
 
-		// Отмечаем сообщения как прочитанные
-		var maxMsgID int
-		for _, msg := range messages {
-			if msg.GetID() > maxMsgID {
-				maxMsgID = msg.GetID()
-			}
-		}
+		// Берем ID самого нового сообщения (первое в списке)
+		maxID := messages[0].GetID()
 
-		// Используем ChannelsReadHistory с InputChannel
+		// Отмечаем прочитанным ДО реакций
 		if _, err := api.ChannelsReadHistory(ctx, &tg.ChannelsReadHistoryRequest{
 			Channel: inputChannel,
-			MaxID:   maxMsgID,
+			MaxID:   maxID,
 		}); err != nil {
-			fmt.Printf("Read history error: %v\n", err)
+			log.Printf("Read history error: %v", err)
 		} else {
-			fmt.Printf("📖 Marked %d messages as read\n", len(messages))
+			log.Printf("📖 Marked messages as read up to %d", maxID)
 		}
 
-		// Опционально: ставим реакции на последние сообщения
-		for i, msg := range messages {
-			humanDelay(1, 2)
+		// Ставим реакции на случайные сообщения
+		for i := 0; i < min(3, len(messages)); i++ { // Макс 3 реакции
+			humanDelay(1, 3)
+
+			// Выбираем случайное сообщение
+			msg := messages[rand.Intn(len(messages))]
 
 			emojiMu.Lock()
 			randomEmoji := emojis[rand.Intn(len(emojis))]
@@ -315,11 +289,10 @@ func readChannel(ctx context.Context, api *tg.Client, channelUsername string) er
 				MsgID:    msg.GetID(),
 				Reaction: []tg.ReactionClass{&tg.ReactionEmoji{Emoticon: randomEmoji}},
 			}); err != nil {
-				fmt.Printf("Reaction %d error: %v\n", i+1, err)
+				log.Printf("Reaction error: %v", err)
 			} else {
-				fmt.Printf("%s Reacted to message %d\n", randomEmoji, msg.GetID())
+				log.Printf("%s Reacted to message %d", randomEmoji, msg.GetID())
 			}
-			humanDelay(1, 2)
 		}
 
 		return nil
@@ -327,7 +300,15 @@ func readChannel(ctx context.Context, api *tg.Client, channelUsername string) er
 	return errors.New("max retries exceeded")
 }
 
-func readChats(ctx context.Context, api *tg.Client) error {
+// Вспомогательная функция для минимума
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+/*func readChats(ctx context.Context, api *tg.Client) error {
 	req := tg.MessagesGetDialogsRequest{
 		Limit:      6,
 		OffsetPeer: &tg.InputPeerEmpty{},
@@ -432,3 +413,29 @@ func readChats(ctx context.Context, api *tg.Client) error {
 	}
 	return nil
 }
+
+func processAccount(path string) {
+	ctx := context.Background()
+	client, err := buildSession(path, ctx)
+	if err != nil {
+		log.Println("NEW ERROR WHHILE BUILDING", err)
+		return
+	}
+
+	actionCtx, cancel := context.WithTimeout(ctx, time.Duration(rand.Intn(4))*time.Minute)
+	defer cancel() // Гарантированно выполнится при выходе из processAccount
+
+	// Синхронная обработка с контролем контекста
+	if err := client.Run(actionCtx, func(ctx context.Context) error {
+		errRead := readChats(ctx, client.API()) // Должна учитывать ctx!
+		if errRead != nil {
+			log.Println("NEW ERROR OCCURED", errRead)
+		}
+		return nil
+	}); err != nil {
+		log.Println("NEW ERORR WHILE LOAD SESSION: ", err)
+	}
+}
+
+
+*/
