@@ -4,14 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
+	"time"
 
 	"github.com/gotd/td/session"
 	"github.com/gotd/td/session/tdesktop"
 	"github.com/gotd/td/telegram"
+	"golang.org/x/net/proxy"
 )
+
+var checkURL = "https://ifconfig.me/ip"
 
 func LoadSessions(fileName string) {
 
@@ -92,4 +99,39 @@ func GetTrash() (string, error) {
 	}
 
 	return strconv.Itoa(len(entry)), nil
+}
+
+func TestProxy(NotParsedUrl string) (bool, string) {
+	arrayOfProxy := strings.Split(NotParsedUrl, ":")
+	proxyAdress := arrayOfProxy[0] + ":" + arrayOfProxy[1]
+	username := arrayOfProxy[2]
+	passwd := arrayOfProxy[3]
+	auth := proxy.Auth{
+		User:     username,
+		Password: passwd,
+	}
+	dialer, err := proxy.SOCKS5("tcp", proxyAdress, &auth,
+		&net.Dialer{
+			Timeout: 10 * time.Second,
+		},
+	)
+	if err != nil {
+		return false, err.Error()
+	}
+	tr := &http.Transport{
+		Dial:                  dialer.Dial,
+		ResponseHeaderTimeout: 15 * time.Second,
+	}
+
+	myClient := &http.Client{
+		Transport: tr,
+		Timeout:   30 * time.Second,
+	}
+	resp, err := myClient.Get(checkURL)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error making request:", err)
+		return false, err.Error()
+	}
+	defer resp.Body.Close()
+	return true, "None"
 }

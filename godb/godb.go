@@ -3,6 +3,7 @@ package godb
 import (
 	"database/sql"
 	"fmt"
+	"math/rand"
 	"os"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -27,15 +28,25 @@ func InitDB() error {
 		return fmt.Errorf("database ping failed: %v", err)
 	}
 
-	// Создаем таблицу если база только что создана
-	createTableSQL := `
+	// Создаем таблицу администраторов
+	createAdminsTable := `
 	CREATE TABLE IF NOT EXISTS admins (
 		id INTEGER PRIMARY KEY,
 		role TEXT NOT NULL
 	);`
+	if _, err := db.Exec(createAdminsTable); err != nil {
+		return fmt.Errorf("failed to create admins table: %v", err)
+	}
 
-	if _, err := db.Exec(createTableSQL); err != nil {
-		return fmt.Errorf("failed to create table: %v", err)
+	// Создаем таблицу прокси
+	createProxiesTable := `
+	CREATE TABLE IF NOT EXISTS proxies (
+		name TEXT PRIMARY KEY,
+		url TEXT NOT NULL,
+		value INTEGER NOT NULL
+	);`
+	if _, err := db.Exec(createProxiesTable); err != nil {
+		return fmt.Errorf("failed to create proxies table: %v", err)
 	}
 
 	// Для отладки: сообщаем о создании новой БД
@@ -113,4 +124,62 @@ func GetAllAdmins() ([]int64, error) {
 	}
 
 	return admins, nil
+}
+
+func AddProxy(name, url string, value int) error {
+	_, err := db.Exec(`
+		INSERT INTO proxies (name, url, value) 
+		VALUES (?, ?, ?)
+		ON CONFLICT(name) DO UPDATE SET
+			url = excluded.url,
+			value = excluded.value
+	`, name, url, value)
+	return err
+}
+
+// GetProxyValue возвращает значение прокси по имени
+func GetProxyValue(name string) (int, error) {
+	var value int
+	err := db.QueryRow("SELECT value FROM proxies WHERE name = ?", name).Scan(&value)
+	return value, err
+}
+
+// GetRandomProxyBelow возвращает случайную прокси с значением <= maxValue
+func GetRandomProxyBelow(maxValue int) (name, url string, err error) {
+	// Сначала получаем количество подходящих прокси
+	var count int
+	err = db.QueryRow(`
+		SELECT COUNT(*) 
+		FROM proxies 
+		WHERE value <= ?
+	`, maxValue).Scan(&count)
+	if err != nil {
+		return "", "", err
+	}
+	if count == 0 {
+		return "", "", sql.ErrNoRows
+	}
+
+	offset := rand.Intn(count)
+
+	// Выбираем прокси по случайному смещению
+	row := db.QueryRow(`
+		SELECT name, url 
+		FROM proxies 
+		WHERE value <= ?
+		LIMIT 1 OFFSET ?
+	`, maxValue, offset)
+
+	err = row.Scan(&name, &url)
+	return name, url, err
+}
+
+// GetProxyCount возвращает количество прокси в базе данных в виде строки
+func GetProxyCount() (string, error) {
+	var count int
+	err := db.QueryRow("SELECT COUNT(*) FROM proxies").Scan(&count)
+	if err != nil {
+		return "", fmt.Errorf("failed to get proxy count: %v", err)
+	}
+	return fmt.Sprintf("%d", count), nil
 }

@@ -29,10 +29,13 @@ var StartKeyboard = tgb.NewInlineKeyboardMarkup(
 		tgb.NewInlineKeyboardButtonData("Аккаунты", "accs-keyboard"),
 	),
 	tgb.NewInlineKeyboardRow(
+		tgb.NewInlineKeyboardButtonData("Прокси", "proxy-keyboard"),
+	),
+	tgb.NewInlineKeyboardRow(
 		tgb.NewInlineKeyboardButtonData("Накрутка", "recruiment-start"),
 	),
 	tgb.NewInlineKeyboardRow(
-		tgb.NewInlineKeyboardButtonData("Муссорка", "trash"),
+		tgb.NewInlineKeyboardButtonData("Мусорка", "trash"),
 	),
 	tgb.NewInlineKeyboardRow(
 		tgb.NewInlineKeyboardButtonData("Начать снос", "report-start"),
@@ -57,6 +60,18 @@ var accKeyboard = tgb.NewInlineKeyboardMarkup(
 	),
 	tgb.NewInlineKeyboardRow(
 		tgb.NewInlineKeyboardButtonData("Загрузить аккаунты (.zip)", "download-accs"),
+	),
+	tgb.NewInlineKeyboardRow(
+		tgb.NewInlineKeyboardButtonData("Меню", "menu"),
+	),
+)
+
+var proxyKeyboard = tgb.NewInlineKeyboardMarkup(
+	tgb.NewInlineKeyboardRow(
+		tgb.NewInlineKeyboardButtonData("Всего прокси", "max-proxy"),
+	),
+	tgb.NewInlineKeyboardRow(
+		tgb.NewInlineKeyboardButtonData("Загрузить прокси", "download-proxy"),
 	),
 	tgb.NewInlineKeyboardRow(
 		tgb.NewInlineKeyboardButtonData("Меню", "menu"),
@@ -168,6 +183,21 @@ func handleMessage(bot *tgb.BotAPI, Message *tgb.Message) {
 				SendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Накрутка на адаптер началась, в течении дня она завершится"))
 				go emulator.JoinChannelWithRotation(Message.Text, bot, Message.Chat.ID)
 			}
+		case "wait_for_proxy":
+			to_check := Message.Text
+			re := regexp.MustCompile(`^((25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d{2}|[1-9]?\d):(\d{1,5}):([a-zA-Z0-9]+):([a-zA-Z0-9]+)$`)
+			if !re.MatchString(to_check) {
+				SendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Отправленный прокси неверен, попробуйте снова. Загрузите прокси ввиде:\nip:порт:логин:пароль"))
+			} else {
+				SendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Отправленный прокси прошел проверку регуляркой, ожидайте тест запроса..."))
+				isValid, typicalError := reader.TestProxy(to_check)
+				if isValid {
+					godb.AddProxy(to_check, strings.Split(to_check, ":")[1]+strings.Split(to_check, ":")[1], 0)
+					SendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Прокси успешно прошёл проверку и был добавлен!"))
+				} else {
+					SendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Прокси не прошёл проверку запросом. Ошибка: "+typicalError))
+				}
+			}
 		}
 
 	}
@@ -199,6 +229,11 @@ func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
 		edit := tgb.NewEditMessageText(callback.Message.Chat.ID, callback.Message.MessageID, "Вы в панеле управления аккаунтами для массовых жалоб, выберите опцию ниже.")
 		edit.ReplyMarkup = &accKeyboard
 		editMessage(bot, edit)
+
+	case "proxy-keyboard":
+		msg := tgb.NewEditMessageText(callback.Message.Chat.ID, callback.Message.MessageID, "Выберите опцию насчет прокси ниже")
+		msg.ReplyMarkup = &proxyKeyboard
+		editMessage(bot, msg)
 	//Administration
 	case "add-admin":
 		SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Отправьте ID администратора"))
@@ -248,6 +283,15 @@ func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
 		UserStateMu.Lock()
 		UserState[callback.From.ID] = "wait_for_channel"
 		UserStateMu.Unlock()
+	//Proxy
+	case "max-proxy":
+		proxy_count, _ := godb.GetProxyCount()
+		SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Всего прокси: "+proxy_count))
+	case "download-proxy":
+		SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Загрузите прокси ввиде:\nip:порт:логин:пароль\nПрокси является socks5. Купить можно на сайте: https://getproxy.io"))
+		UserStateMu.Lock()
+		UserState[callback.From.ID] = "wait_for_proxy"
+		UserStateMu.Unlock()
 	default:
 		parts := strings.Split(callback.Data, "-")
 		ToReportMu.Lock()
@@ -268,7 +312,6 @@ func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
 				}
 			}
 			SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Жалобы успешно отправлены, запрос обработан"))
-
 		}
 	}
 }
