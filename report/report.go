@@ -6,14 +6,18 @@ import (
 	"errors"
 	"fmt"
 	"math/rand/v2"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/gotd/td/session"
 	"github.com/gotd/td/telegram"
+	"github.com/gotd/td/telegram/dcs"
 	"github.com/gotd/td/tg"
+	"golang.org/x/net/proxy"
 )
 
 type MessageData struct {
@@ -26,7 +30,7 @@ func IsValid(username string) bool {
 	re := regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{4,31}$`)
 	return re.MatchString(username)
 }
-func StartReport(pathToFile string, username string, reportType string) error {
+func StartReport(pathToFile string, username string, reportType string, fileName string) error {
 	ctx := context.Background()
 	actionCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
@@ -35,6 +39,28 @@ func StartReport(pathToFile string, username string, reportType string) error {
 	if err != nil {
 		fmt.Println("Error reading session file:", err)
 		return err
+	}
+	proxyURL := fileName
+	var dialer proxy.Dialer
+	if proxyURL != "" {
+		parts := strings.Split(proxyURL, ":")
+		if len(parts) < 4 {
+			return errors.New("неверный формат прокси")
+		}
+
+		addr := net.JoinHostPort(parts[0], parts[1])
+		auth := proxy.Auth{
+			User:     parts[2],
+			Password: parts[3],
+		}
+
+		var err error
+		dialer, err = proxy.SOCKS5("tcp", addr, &auth, proxy.Direct)
+		if err != nil {
+			return fmt.Errorf("ошибка создания прокси: %w", err)
+		}
+	} else {
+		dialer = proxy.Direct // Прямое подключение без прокси
 	}
 
 	var sessionInfo *session.Data
@@ -49,12 +75,18 @@ func StartReport(pathToFile string, username string, reportType string) error {
 		fmt.Println("Error loading session into storage:", err)
 		return err
 	}
+	dialContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
+		return dialer.Dial(network, addr)
+	}
 
 	client := telegram.NewClient(telegram.TestAppID, telegram.TestAppHash, telegram.Options{
 		SessionStorage:      storage,
 		ReconnectionBackoff: nil,
 		NoUpdates:           true,
 		MaxRetries:          2,
+		Resolver: dcs.Plain(dcs.PlainOptions{
+			Dial: dialContext,
+		}),
 	})
 
 	if err := client.Run(actionCtx, func(ctx context.Context) error {

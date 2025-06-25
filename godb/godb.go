@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 )
@@ -126,7 +127,30 @@ func GetAllAdmins() ([]int64, error) {
 	return admins, nil
 }
 
-func AddProxy(name, url string, value int) error {
+// GetProxyByName возвращает прокси по имени в формате "ip:port:login:password"
+func GetProxyByName(name string) (string, error) {
+	var url string
+	err := db.QueryRow("SELECT url FROM proxies WHERE name = ?", name).Scan(&url)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return "", nil // Не найдено - возвращаем пустую строку без ошибки
+		}
+		return "", err
+	}
+	return url, nil
+}
+
+// AddProxy в формате "ip:port:login:password" с автоматическим именем
+func AddProxy(fullProxyStr string, value int) error {
+	parts := strings.Split(fullProxyStr, ":")
+	if len(parts) < 4 {
+		return fmt.Errorf("invalid proxy format")
+	}
+
+	// Формируем уникальное имя: login@ip:port
+	name := fmt.Sprintf("%s@%s:%s", parts[2], parts[0], parts[1])
+	url := fullProxyStr
+
 	_, err := db.Exec(`
 		INSERT INTO proxies (name, url, value) 
 		VALUES (?, ?, ?)

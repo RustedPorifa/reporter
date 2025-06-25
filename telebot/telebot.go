@@ -192,7 +192,7 @@ func handleMessage(bot *tgb.BotAPI, Message *tgb.Message) {
 				SendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Отправленный прокси прошел проверку регуляркой, ожидайте тест запроса..."))
 				isValid, typicalError := reader.TestProxy(to_check)
 				if isValid {
-					godb.AddProxy(to_check, strings.Split(to_check, ":")[1]+strings.Split(to_check, ":")[1], 0)
+					godb.AddProxy(to_check, 0)
 					SendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Прокси успешно прошёл проверку и был добавлен!"))
 				} else {
 					SendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Прокси не прошёл проверку запросом. Ошибка: "+typicalError))
@@ -305,7 +305,7 @@ func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
 				return
 			}
 			for _, sess := range entry {
-				err := report.StartReport(filepath.Join("sessions", sess.Name()), usernameReport, parts[2])
+				err := report.StartReport(filepath.Join("sessions", sess.Name()), usernameReport, parts[2], sess.Name())
 				if err != nil {
 					println(err.Error())
 					continue
