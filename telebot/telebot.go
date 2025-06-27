@@ -142,6 +142,7 @@ func handleMessage(bot *tgb.BotAPI, Message *tgb.Message) {
 	if Message.IsCommand() && isAdmin {
 		switch Message.Command() {
 		case "start":
+			ClearUserStates(Message.From.ID)
 			msg := tgb.NewMessage(Message.Chat.ID, "Добро пожаловать в бота!\nПожалуйста, выберите опцию ниже")
 			msg.ReplyMarkup = StartKeyboard
 			SendMessage(bot, msg)
@@ -194,6 +195,7 @@ func handleMessage(bot *tgb.BotAPI, Message *tgb.Message) {
 				if isValid {
 					godb.AddProxy(to_check, 0)
 					SendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Прокси успешно прошёл проверку и был добавлен!"))
+					ClearUserStates(Message.From.ID)
 				} else {
 					SendMessage(bot, tgb.NewMessage(Message.Chat.ID, "Прокси не прошёл проверку запросом. Ошибка: "+typicalError))
 				}
@@ -218,6 +220,7 @@ func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
 
 	//Keyboards
 	case "menu":
+		ClearUserStates(callback.From.ID)
 		msg := tgb.NewEditMessageText(callback.Message.Chat.ID, callback.Message.MessageID, "Добро пожаловать в бота!\nПожалуйста, выберите опцию ниже")
 		msg.ReplyMarkup = &StartKeyboard
 		editMessage(bot, msg)
@@ -299,21 +302,60 @@ func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
 			ToReportMu.Lock()
 			usernameReport := ToReport[callback.From.ID]
 			ToReportMu.Unlock()
+
 			if len(parts) == 3 && parts[1] == "complaint" && usernameReport != "" {
 				SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Запрос успешно обработан! Жалобы будут отправлены в скором времени."))
-				entry, err := os.ReadDir("sessions")
-				if err != nil {
-					SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, err.Error()))
+
+				// Проверка существования директории
+				if _, err := os.Stat("sessions"); os.IsNotExist(err) {
+					SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Ошибка: директория sessions не существует"))
 					return
 				}
+
+				entry, err := os.ReadDir("sessions")
+				if err != nil {
+					SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Ошибка чтения директории: "+err.Error()))
+					return
+				}
+
+				// Диагностика: сколько сессий найдено
+				SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, fmt.Sprintf("Найдено сессий: %d", len(entry))))
+
+				if len(entry) == 0 {
+					SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Ошибка: нет доступных сессий"))
+					return
+				}
+
+				var (
+					successCount int
+					errorCount   int
+					errorMsgs    []string
+				)
+
 				for _, sess := range entry {
-					err := report.StartReport(filepath.Join("sessions", sess.Name()), usernameReport, parts[2], sess.Name())
+					sessionPath := filepath.Join("sessions", sess.Name())
+					log.Printf("Обработка сессии: %s", sessionPath)
+
+					err := report.StartReport(sessionPath, usernameReport, parts[2], sess.Name())
 					if err != nil {
-						println(err.Error())
-						continue
+						errorCount++
+						errorMsg := fmt.Sprintf("Сессия %s: %v", sess.Name(), err)
+						errorMsgs = append(errorMsgs, errorMsg)
+						log.Println(errorMsg)
+					} else {
+						successCount++
 					}
 				}
-				SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Жалобы успешно отправлены, запрос обработан"))
+
+				// Формирование итогового отчета
+				reportMsg := fmt.Sprintf("Жалобы обработаны!\nУспешно: %d\nОшибки: %d", successCount, errorCount)
+
+				if errorCount > 0 {
+					reportMsg += "\nПоследние ошибки:\n" + strings.Join(errorMsgs[:min(3, len(errorMsgs))], "\n")
+				}
+
+				SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, reportMsg))
+				ClearUserStates(callback.From.ID)
 			}
 		}()
 	}
@@ -422,4 +464,14 @@ func unzip(src string, dest string) error {
 	}
 	os.Remove(src)
 	return nil
+}
+
+func ClearUserStates(userID int64) {
+	UserStateMu.Lock()
+	delete(UserState, userID)
+	UserStateMu.Unlock()
+
+	ToReportMu.Lock()
+	delete(ToReport, userID)
+	ToReportMu.Unlock()
 }

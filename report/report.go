@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math/rand/v2"
 	"net"
 	"os"
@@ -38,7 +39,7 @@ func StartReport(pathToFile string, username string, reportType string, fileName
 		return fmt.Errorf("invalid username format: %s", username)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(rand.IntN(10)+5)*time.Minute)
 	defer cancel()
 
 	// Чтение сессионного файла
@@ -50,13 +51,13 @@ func StartReport(pathToFile string, username string, reportType string, fileName
 	// Инициализация dialer
 	dialer, err := initProxyDialer(fileName)
 	if err != nil {
-		return fmt.Errorf("proxy initialization failed: %w", err)
+		dialer = proxy.Direct
 	}
 
 	// Загрузка сессии
 	storage, err := loadSession(dataBytes)
 	if err != nil {
-		return err
+		log.Println(err)
 	}
 
 	// Создание клиента Telegram
@@ -66,8 +67,8 @@ func StartReport(pathToFile string, username string, reportType string, fileName
 	if err := client.Run(ctx, func(ctx context.Context) error {
 		return performReport(ctx, client.API(), username, reportType)
 	}); err != nil {
-		moveToTrash(pathToFile)
-		return fmt.Errorf("report operation failed: %w", err)
+		log.Println(err)
+		//moveToTrash(pathToFile)
 	}
 
 	return nil
@@ -149,7 +150,7 @@ func performReport(ctx context.Context, api *tg.Client, username, reportType str
 		Username: username,
 	})
 	if err != nil {
-		return fmt.Errorf("username resolution failed: %w", err)
+		return err
 	}
 
 	// Поиск целевого пользователя
@@ -170,7 +171,7 @@ func performReport(ctx context.Context, api *tg.Client, username, reportType str
 	// Загрузка сообщений для репорта
 	messages, err := loadReportMessages(reportType)
 	if err != nil {
-		return err
+		return errors.New("проверьте существует ли папка messages")
 	}
 
 	// Выбор случайного сообщения
