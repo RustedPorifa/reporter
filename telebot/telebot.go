@@ -286,33 +286,36 @@ func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
 	//Proxy
 	case "max-proxy":
 		proxy_count, _ := godb.GetProxyCount()
-		SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Всего прокси: "+proxy_count))
+		proxy_countStr := strconv.Itoa(proxy_count)
+		SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Всего прокси: "+proxy_countStr))
 	case "download-proxy":
 		SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Загрузите прокси ввиде:\nip:порт:логин:пароль\nПрокси является socks5. Купить можно на сайте: https://getproxy.io"))
 		UserStateMu.Lock()
 		UserState[callback.From.ID] = "wait_for_proxy"
 		UserStateMu.Unlock()
 	default:
-		parts := strings.Split(callback.Data, "-")
-		ToReportMu.Lock()
-		usernameReport := ToReport[callback.From.ID]
-		ToReportMu.Unlock()
-		if len(parts) == 3 && parts[1] == "complaint" && usernameReport != "" {
-			SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Запрос успешно обработан! Жалобы будут отправлены в скором времени."))
-			entry, err := os.ReadDir("sessions")
-			if err != nil {
-				SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, err.Error()))
-				return
-			}
-			for _, sess := range entry {
-				err := report.StartReport(filepath.Join("sessions", sess.Name()), usernameReport, parts[2], sess.Name())
+		go func() {
+			parts := strings.Split(callback.Data, "-")
+			ToReportMu.Lock()
+			usernameReport := ToReport[callback.From.ID]
+			ToReportMu.Unlock()
+			if len(parts) == 3 && parts[1] == "complaint" && usernameReport != "" {
+				SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Запрос успешно обработан! Жалобы будут отправлены в скором времени."))
+				entry, err := os.ReadDir("sessions")
 				if err != nil {
-					println(err.Error())
-					continue
+					SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, err.Error()))
+					return
 				}
+				for _, sess := range entry {
+					err := report.StartReport(filepath.Join("sessions", sess.Name()), usernameReport, parts[2], sess.Name())
+					if err != nil {
+						println(err.Error())
+						continue
+					}
+				}
+				SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Жалобы успешно отправлены, запрос обработан"))
 			}
-			SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Жалобы успешно отправлены, запрос обработан"))
-		}
+		}()
 	}
 }
 

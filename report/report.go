@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"reporter/godb"
+	"reporter/reader"
 	"strings"
 	"time"
 
@@ -31,119 +33,185 @@ func IsValid(username string) bool {
 	return re.MatchString(username)
 }
 func StartReport(pathToFile string, username string, reportType string, fileName string) error {
-	ctx := context.Background()
-	actionCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	// Проверка username перед началом операции
+	if !IsValid(username) {
+		return fmt.Errorf("invalid username format: %s", username)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
+	// Чтение сессионного файла
 	dataBytes, err := os.ReadFile(pathToFile)
 	if err != nil {
-		fmt.Println("Error reading session file:", err)
+		return fmt.Errorf("error reading session file: %w", err)
+	}
+
+	// Инициализация dialer
+	dialer, err := initProxyDialer(fileName)
+	if err != nil {
+		return fmt.Errorf("proxy initialization failed: %w", err)
+	}
+
+	// Загрузка сессии
+	storage, err := loadSession(dataBytes)
+	if err != nil {
 		return err
 	}
-	proxyURL := fileName
-	var dialer proxy.Dialer
-	if proxyURL != "" {
-		parts := strings.Split(proxyURL, ":")
-		if len(parts) < 4 {
-			return errors.New("неверный формат прокси")
-		}
 
-		addr := net.JoinHostPort(parts[0], parts[1])
-		auth := proxy.Auth{
-			User:     parts[2],
-			Password: parts[3],
-		}
+	// Создание клиента Telegram
+	client := createTelegramClient(storage, dialer)
 
-		var err error
-		dialer, err = proxy.SOCKS5("tcp", addr, &auth, proxy.Direct)
-		if err != nil {
-			return fmt.Errorf("ошибка создания прокси: %w", err)
-		}
-	} else {
-		dialer = proxy.Direct // Прямое подключение без прокси
+	// Выполнение операции репорта
+	if err := client.Run(ctx, func(ctx context.Context) error {
+		return performReport(ctx, client.API(), username, reportType)
+	}); err != nil {
+		moveToTrash(pathToFile)
+		return fmt.Errorf("report operation failed: %w", err)
 	}
 
-	var sessionInfo *session.Data
+	return nil
+}
+
+// Вспомогательные функции
+func initProxyDialer(fileName string) (proxy.Dialer, error) {
+	// Пытаемся получить прокси по имени
+	proxyURL, err := godb.GetProxyByName(fileName)
+	if err == nil && proxyURL != "" {
+		return createProxyDialer(proxyURL)
+	}
+
+	// Получаем случайный прокси
+	accValue, err1 := reader.GetReports()
+	proxyCount, err2 := godb.GetProxyCount()
+
+	value := 0
+	if err1 == nil && err2 == nil && proxyCount > 0 {
+		value = accValue / proxyCount
+	}
+
+	newProxy, err := godb.GetRandomProxyBelow(value)
+	if err != nil {
+		return proxy.Direct, nil // Используем прямое соединение как fallback
+	}
+
+	return createProxyDialer(newProxy)
+}
+
+func createProxyDialer(proxyURL string) (proxy.Dialer, error) {
+	parts := strings.Split(proxyURL, ":")
+	if len(parts) < 4 {
+		return nil, errors.New("invalid proxy format")
+	}
+
+	addr := net.JoinHostPort(parts[0], parts[1])
+	auth := proxy.Auth{User: parts[2], Password: parts[3]}
+
+	dialer, err := proxy.SOCKS5("tcp", addr, &auth, proxy.Direct)
+	if err != nil {
+		return nil, fmt.Errorf("proxy creation error: %w", err)
+	}
+	return dialer, nil
+}
+
+func loadSession(dataBytes []byte) (*session.StorageMemory, error) {
+	var sessionInfo session.Data
 	if err := json.Unmarshal(dataBytes, &sessionInfo); err != nil {
-		fmt.Println("Error unmarshaling session:", err)
-		return err
+		return nil, fmt.Errorf("session unmarshal error: %w", err)
 	}
 
 	storage := &session.StorageMemory{}
 	loader := session.Loader{Storage: storage}
-	if err := loader.Save(ctx, sessionInfo); err != nil {
-		fmt.Println("Error loading session into storage:", err)
-		return err
+	if err := loader.Save(context.Background(), &sessionInfo); err != nil {
+		return nil, fmt.Errorf("session load error: %w", err)
 	}
+	return storage, nil
+}
+
+func createTelegramClient(storage session.Storage, dialer proxy.Dialer) *telegram.Client {
 	dialContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
 		return dialer.Dial(network, addr)
 	}
 
-	client := telegram.NewClient(telegram.TestAppID, telegram.TestAppHash, telegram.Options{
-		SessionStorage:      storage,
-		ReconnectionBackoff: nil,
-		NoUpdates:           true,
-		MaxRetries:          2,
+	return telegram.NewClient(telegram.TestAppID, telegram.TestAppHash, telegram.Options{
+		SessionStorage: storage,
+		NoUpdates:      true,
+		MaxRetries:     2,
 		Resolver: dcs.Plain(dcs.PlainOptions{
 			Dial: dialContext,
 		}),
 	})
+}
 
-	if err := client.Run(actionCtx, func(ctx context.Context) error {
-		api := client.API()
-		resolved, errResolved := api.ContactsResolveUsername(actionCtx, &tg.ContactsResolveUsernameRequest{
-			Username: username,
-		})
-		if errResolved != nil {
-			return errResolved
-		}
+func performReport(ctx context.Context, api *tg.Client, username, reportType string) error {
+	// Разрешение username
+	resolved, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{
+		Username: username,
+	})
+	if err != nil {
+		return fmt.Errorf("username resolution failed: %w", err)
+	}
 
-		var targetPeer tg.InputPeerClass
-		for _, user := range resolved.Users {
-			if u, ok := user.(*tg.User); ok && u.Username == username {
-				targetPeer = &tg.InputPeerUser{
-					UserID:     u.ID,
-					AccessHash: u.AccessHash,
-				}
-				break
+	// Поиск целевого пользователя
+	var targetPeer tg.InputPeerClass
+	for _, user := range resolved.Users {
+		if u, ok := user.(*tg.User); ok && strings.EqualFold(u.Username, username) {
+			targetPeer = &tg.InputPeerUser{
+				UserID:     u.ID,
+				AccessHash: u.AccessHash,
 			}
+			break
 		}
-		if targetPeer == nil {
-			return errors.New("не было найдено ни единого пользователя")
-		}
+	}
+	if targetPeer == nil {
+		return errors.New("target user not found")
+	}
 
-		msgPath := filepath.Join("messages", reportType+".json")
-		jsonData, jserr := os.ReadFile(msgPath)
-		if jserr != nil {
-			return fmt.Errorf("error reading messages file: %w", jserr)
-		}
-
-		if len(jsonData) == 0 {
-			return errors.New("messages file is empty")
-		}
-
-		var messageData MessageData
-		if err := json.Unmarshal(jsonData, &messageData); err != nil {
-			return fmt.Errorf("JSON parsing error: %w", err)
-		}
-
-		if len(messageData.Messages) == 0 {
-			return errors.New("no messages available")
-		}
-
-		index := rand.IntN(len(messageData.Messages))
-
-		_, errReport := api.AccountReportPeer(actionCtx, &tg.AccountReportPeerRequest{
-			Peer:    targetPeer,
-			Reason:  &tg.InputReportReasonSpam{},
-			Message: messageData.Messages[index],
-		})
-		return errReport
-	}); err != nil {
-		if _, err := os.Stat(trashPath); !os.IsNotExist(err) {
-			os.Rename(pathToFile, filepath.Join(trashPath, filepath.Base(pathToFile)))
-		}
+	// Загрузка сообщений для репорта
+	messages, err := loadReportMessages(reportType)
+	if err != nil {
 		return err
 	}
-	return nil
+
+	// Выбор случайного сообщения
+	index := rand.IntN(len(messages))
+
+	// Отправка репорта
+	_, err = api.AccountReportPeer(ctx, &tg.AccountReportPeerRequest{
+		Peer:    targetPeer,
+		Reason:  &tg.InputReportReasonSpam{},
+		Message: messages[index],
+	})
+	return err
+}
+
+func loadReportMessages(reportType string) ([]string, error) {
+	msgPath := filepath.Join("messages", reportType+".json")
+	jsonData, err := os.ReadFile(msgPath)
+	if err != nil {
+		return nil, fmt.Errorf("error reading messages file: %w", err)
+	}
+
+	if len(jsonData) == 0 {
+		return nil, errors.New("messages file is empty")
+	}
+
+	var messageData MessageData
+	if err := json.Unmarshal(jsonData, &messageData); err != nil {
+		return nil, fmt.Errorf("JSON parsing error: %w", err)
+	}
+
+	if len(messageData.Messages) == 0 {
+		return nil, errors.New("no messages available")
+	}
+	return messageData.Messages, nil
+}
+
+func moveToTrash(path string) {
+	if _, err := os.Stat(trashPath); os.IsNotExist(err) {
+		os.Mkdir(trashPath, 0755)
+	}
+
+	dest := filepath.Join(trashPath, filepath.Base(path))
+	os.Rename(path, dest)
 }

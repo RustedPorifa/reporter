@@ -3,7 +3,6 @@ package godb
 import (
 	"database/sql"
 	"fmt"
-	"math/rand"
 	"os"
 	"strings"
 
@@ -168,42 +167,33 @@ func GetProxyValue(name string) (int, error) {
 	return value, err
 }
 
-// GetRandomProxyBelow возвращает случайную прокси с значением <= maxValue
-func GetRandomProxyBelow(maxValue int) (name, url string, err error) {
-	// Сначала получаем количество подходящих прокси
-	var count int
-	err = db.QueryRow(`
-		SELECT COUNT(*) 
-		FROM proxies 
-		WHERE value <= ?
-	`, maxValue).Scan(&count)
-	if err != nil {
-		return "", "", err
+// GetRandomProxyBelow возвращает случайный прокси-сервер со значением <= maxValue
+func GetRandomProxyBelow(maxValue int) (string, error) {
+	var proxyURL string
+	err := db.QueryRow(`
+        SELECT url 
+        FROM proxies 
+        WHERE value <= ?
+        ORDER BY RANDOM()
+        LIMIT 1
+    `, maxValue).Scan(&proxyURL)
+
+	switch {
+	case err == sql.ErrNoRows:
+		return "", fmt.Errorf("no proxies available with value <= %d", maxValue)
+	case err != nil:
+		return "", fmt.Errorf("database error: %v", err)
+	default:
+		return proxyURL, nil
 	}
-	if count == 0 {
-		return "", "", sql.ErrNoRows
-	}
-
-	offset := rand.Intn(count)
-
-	// Выбираем прокси по случайному смещению
-	row := db.QueryRow(`
-		SELECT name, url 
-		FROM proxies 
-		WHERE value <= ?
-		LIMIT 1 OFFSET ?
-	`, maxValue, offset)
-
-	err = row.Scan(&name, &url)
-	return name, url, err
 }
 
 // GetProxyCount возвращает количество прокси в базе данных в виде строки
-func GetProxyCount() (string, error) {
+func GetProxyCount() (int, error) {
 	var count int
 	err := db.QueryRow("SELECT COUNT(*) FROM proxies").Scan(&count)
 	if err != nil {
-		return "", fmt.Errorf("failed to get proxy count: %v", err)
+		return 0, fmt.Errorf("failed to get proxy count: %v", err)
 	}
-	return fmt.Sprintf("%d", count), nil
+	return count, nil
 }
