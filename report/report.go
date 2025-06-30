@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"reporter/godb"
 	"reporter/reader"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,14 +30,21 @@ type MessageData struct {
 
 var trashPath = filepath.Join("trash")
 
-func IsValid(username string) bool {
+func IsValid(identifier string) bool {
+	// Проверка на числовой ID
+	if _, err := strconv.ParseInt(identifier, 10, 64); err == nil {
+		return true
+	}
+
+	// Проверка username (без @ в начале)
 	re := regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{4,31}$`)
-	return re.MatchString(username)
+	return re.MatchString(identifier)
 }
-func StartReport(pathToFile string, username string, reportType string, fileName string) error {
-	// Проверка username перед началом операции
-	if !IsValid(username) {
-		return fmt.Errorf("invalid username format: %s", username)
+
+func StartReport(pathToFile string, identifier string, reportType string, fileName string) error {
+	// Проверка идентификатора перед началом операции
+	if !IsValid(identifier) {
+		return fmt.Errorf("invalid identifier format: %s", identifier)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(rand.IntN(10)+5)*time.Minute)
@@ -65,10 +73,11 @@ func StartReport(pathToFile string, username string, reportType string, fileName
 
 	// Выполнение операции репорта
 	if err := client.Run(ctx, func(ctx context.Context) error {
-		return performReport(ctx, client.API(), username, reportType)
+		return performReport(ctx, client.API(), identifier, reportType)
 	}); err != nil {
 		log.Println(err)
-		//moveToTrash(pathToFile)
+		moveToTrash(pathToFile)
+		return err
 	}
 
 	return nil
@@ -144,7 +153,18 @@ func createTelegramClient(storage session.Storage, dialer proxy.Dialer) *telegra
 	})
 }
 
-func performReport(ctx context.Context, api *tg.Client, username, reportType string) error {
+func performReport(ctx context.Context, api *tg.Client, identifier, reportType string) error {
+	// Попробуем обработать как числовой ID
+	if id, err := strconv.ParseInt(identifier, 10, 64); err == nil {
+		return reportByID(ctx, api, id, reportType)
+	}
+
+	// Обрабатываем как username (удаляем @ если есть)
+	username := strings.TrimPrefix(identifier, "@")
+	return reportByUsername(ctx, api, username, reportType)
+}
+
+func reportByUsername(ctx context.Context, api *tg.Client, username, reportType string) error {
 	// Разрешение username
 	resolved, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{
 		Username: username,
@@ -168,22 +188,86 @@ func performReport(ctx context.Context, api *tg.Client, username, reportType str
 		return errors.New("target user not found")
 	}
 
+	return sendReport(ctx, api, targetPeer, reportType)
+}
+
+func reportByID(ctx context.Context, api *tg.Client, userID int64, reportType string) error {
+	// Получаем информацию о пользователе по ID
+	users, err := api.UsersGetUsers(ctx, []tg.InputUserClass{
+		&tg.InputUser{
+			UserID: userID,
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to get user by ID: %w", err)
+	}
+
+	if len(users) == 0 {
+		return errors.New("user not found by ID")
+	}
+
+	user, ok := users[0].(*tg.User)
+	if !ok {
+		return errors.New("invalid user object received")
+	}
+
+	targetPeer := &tg.InputPeerUser{
+		UserID:     user.ID,
+		AccessHash: user.AccessHash,
+	}
+
+	return sendReport(ctx, api, targetPeer, reportType)
+}
+
+func sendReport(ctx context.Context, api *tg.Client, peer tg.InputPeerClass, reportType string) error {
 	// Загрузка сообщений для репорта
 	messages, err := loadReportMessages(reportType)
 	if err != nil {
-		return errors.New("проверьте существует ли папка messages")
+		return fmt.Errorf("failed to load report messages: %w", err)
 	}
 
 	// Выбор случайного сообщения
+	if len(messages) == 0 {
+		return errors.New("no messages available for report")
+	}
 	index := rand.IntN(len(messages))
+
+	// Определение причины жалобы
+	reason, err := getReportReason(reportType)
+	if err != nil {
+		return err
+	}
 
 	// Отправка репорта
 	_, err = api.AccountReportPeer(ctx, &tg.AccountReportPeerRequest{
-		Peer:    targetPeer,
-		Reason:  &tg.InputReportReasonSpam{},
+		Peer:    peer,
+		Reason:  reason,
 		Message: messages[index],
 	})
 	return err
+}
+
+func getReportReason(reportType string) (tg.ReportReasonClass, error) {
+	switch reportType {
+	case "spam":
+		return &tg.InputReportReasonSpam{}, nil
+	case "author":
+		return &tg.InputReportReasonCopyright{}, nil
+	case "geo":
+		return &tg.InputReportReasonGeoIrrelevant{}, nil
+	case "drug":
+		return &tg.InputReportReasonIllegalDrugs{}, nil
+	case "child":
+		return &tg.InputReportReasonChildAbuse{}, nil
+	case "personal":
+		return &tg.InputReportReasonPersonalDetails{}, nil
+	case "porno":
+		return &tg.InputReportReasonPornography{}, nil
+	case "violence":
+		return &tg.InputReportReasonViolence{}, nil
+	default:
+		return nil, fmt.Errorf("unknown report type: %s", reportType)
+	}
 }
 
 func loadReportMessages(reportType string) ([]string, error) {
@@ -214,5 +298,7 @@ func moveToTrash(path string) {
 	}
 
 	dest := filepath.Join(trashPath, filepath.Base(path))
-	os.Rename(path, dest)
+	if err := os.Rename(path, dest); err != nil {
+		log.Printf("Error moving to trash: %v", err)
+	}
 }

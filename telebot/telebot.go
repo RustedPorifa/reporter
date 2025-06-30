@@ -277,7 +277,7 @@ func handleCallback(bot *tgb.BotAPI, callback *tgb.CallbackQuery) {
 		SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Отправьте .zip файл, который состоит из Tdata для загрузки"))
 		//reports
 	case "report-start":
-		SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Введите юзернейм пользователя для сноса\nВид юзернейма должен представлять исключительно сам юзернейм\n@dunduk -> dunduk"))
+		SendMessage(bot, tgb.NewMessage(callback.Message.Chat.ID, "Введите юзернейм пользователя либо ID пользователя.\nЮзернейм вида: @dunduk\nID вида: 34895723\nВыберите что-то одно и отправьте боту"))
 		UserStateMu.Lock()
 		UserState[callback.From.ID] = "wait_for_username"
 		UserStateMu.Unlock()
